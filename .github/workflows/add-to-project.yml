@@ -9,7 +9,7 @@ jobs:
    runs-on: ubuntu-latest
    steps:
      - name: Add issue to project
-       uses: actions/add-to-project@v1
+       uses: skeet70/default-project-board-action@v1
        with:
          project-url: https://github.com/orgs/jaganpaz/DemoFoodOrdering
          github-token: ${{ secrets.SRIS_TOKEN }}
