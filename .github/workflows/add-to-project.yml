@@ -11,5 +11,5 @@ jobs:
      - name: Add issue to project
        uses: skeet70/default-project-board-action@v1
        with:
-         project-url: https://github.com/orgs/jaganpaz/DemoFoodOrdering
+         project-url: https://github.com/users/jaganpaz/projects/3/
          github-token: ${{ secrets.SRIS_TOKEN }}
