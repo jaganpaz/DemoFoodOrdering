@@ -1,1 +1,108 @@
 
+name: Update Issue Priority in Project
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  issues: write
+  project: write
+
+jobs:
+  update-priority:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check issue labels and update project priority
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.SRIS_TOKEN }}
+          script: |
+            const labelPriorityMap = {
+              'low': 'Low',
+              'medium': 'Medium',
+              'high': 'High'
+            };
+
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(label => label.name.toLowerCase());
+            const matchingLabel = labels.find(label => labelPriorityMap[label]);
+
+            if (!matchingLabel) {
+              console.log("No priority label found. Exiting.");
+              return;
+            }
+
+            const priorityValue = labelPriorityMap[matchingLabel];
+
+            // Get the project items for this issue
+            const issueNodeId = issue.node_id;
+
+            const projectItems = await github.graphql(`
+              query($issueId: ID!) {
+                node(id: $issueId) {
+                  ... on Issue {
+                    projectItems(first: 10) {
+                      nodes {
+                        id
+                        project {
+                          id
+                          fields(first: 20) {
+                            nodes {
+                              id
+                              name
+                              settings
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, {
+              issueId: issueNodeId
+            });
+
+            const projectItem = projectItems.node.projectItems.nodes[0];
+            if (!projectItem) {
+              console.log("No project item found for this issue.");
+              return;
+            }
+
+            const priorityField = projectItem.project.fields.nodes.find(f => f.name === 'Priority');
+            if (!priorityField) {
+              console.log("Priority field not found.");
+              return;
+            }
+
+            const priorityOptions = JSON.parse(priorityField.settings).options;
+            const option = priorityOptions.find(o => o.name === priorityValue);
+            if (!option) {
+              console.log(`Priority option '${priorityValue}' not found.`);
+              return;
+            }
+
+            await github.graphql(`
+              mutation($itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: "${projectItem.project.id}",
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: {
+                    singleSelectOptionId: $optionId
+                  }
+                }) {
+                  projectV2Item {
+                    id
+                  }
+                }
+              }
+            `, {
+              itemId: projectItem.id,
+              fieldId: priorityField.id,
+              optionId: option.id
+            });
+
+            console.log(`Priority updated to '${priorityValue}' for issue #${issue.number}`);
