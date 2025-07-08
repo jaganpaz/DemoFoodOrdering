@@ -10,7 +10,7 @@ jobs:
     permissions:
       issues: read
       contents: read
-      project: write  # Required to update project fields
+      projects: write  # Required to update project fields
 
     steps:
       - name: Set priority in GitHub Project
