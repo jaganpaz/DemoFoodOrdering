@@ -50,7 +50,7 @@ jobs:
               }
             `, { issueId: issueNodeId });
 
-            const targetProjectName = "My Project Name"; // Replace with your actual project name
+            const targetProjectName = "3" 
             const projectItem = projects.node.projectItems.nodes.find(item =>
               item.project && item.project.title === targetProjectName
             );
@@ -116,5 +116,3 @@ jobs:
               fieldId: priorityField.id,
               optionId: option.id
             });
-
-            console.log(Set priority to '${priorityValue}' for issue #${issue.number});
