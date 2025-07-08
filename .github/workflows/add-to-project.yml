@@ -7,10 +7,6 @@ on:
 jobs:
   set-priority:
     runs-on: ubuntu-latest
-    permissions:
-      issues: read
-      contents: read
-      projects: write  # Required to update project fields
 
     steps:
       - name: Set priority in GitHub Project
@@ -20,7 +16,6 @@ jobs:
             const issue = context.payload.issue;
             const labels = issue.labels.map(label => label.name.toLowerCase());
 
-            // Map labels to project priority values
             const priorityMap = {
               'low': 'Low',
               'medium': 'Medium',
@@ -28,7 +23,6 @@ jobs:
               'critical': 'Critical'
             };
 
-            // Find the first matching priority label
             const matchedLabel = Object.keys(priorityMap).find(label => labels.includes(label));
             if (!matchedLabel) {
               console.log("No priority label found. Skipping.");
@@ -36,8 +30,6 @@ jobs:
             }
 
             const priorityValue = priorityMap[matchedLabel];
-
-            // Get project items for this issue
             const issueNodeId = issue.node_id;
 
             const projects = await github.graphql(`
@@ -49,26 +41,28 @@ jobs:
                         id
                         project {
                           id
+                          title
                         }
                       }
                     }
                   }
                 }
               }
-            `, {
-              issueId: issueNodeId
-            });
+            `, { issueId: issueNodeId });
 
-            const projectItem = projects.node.projectItems.nodes[0];
+            const targetProjectName = "My Project Name"; // Replace with your actual project name
+            const projectItem = projects.node.projectItems.nodes.find(item =>
+              item.project && item.project.title === targetProjectName
+            );
+
             if (!projectItem) {
-              console.log("Issue not found in any project.");
+              console.log(Issue is not part of the project '${targetProjectName}'.);
               return;
             }
 
             const projectId = projectItem.project.id;
             const itemId = projectItem.id;
 
-            // Get project fields
             const fieldsQuery = await github.graphql(`
               query($projectId: ID!) {
                 node(id: $projectId) {
@@ -88,9 +82,7 @@ jobs:
                   }
                 }
               }
-            `, {
-              projectId
-            });
+            `, { projectId });
 
             const priorityField = fieldsQuery.node.fields.nodes.find(f => f.name === "Priority");
             if (!priorityField) {
@@ -104,7 +96,6 @@ jobs:
               return;
             }
 
-            // Update the priority field
             await github.graphql(`
               mutation($itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
