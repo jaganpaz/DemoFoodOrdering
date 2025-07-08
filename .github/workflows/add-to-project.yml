@@ -1,88 +1,80 @@
-name: Add Issue to Project and Set Priority
+name: Set Project Priority from Issue Label
 
 on:
   issues:
     types: [opened, labeled]
 
 jobs:
-  add_to_project:
+  set-priority:
     runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      contents: read
+      project: write  # Required to update project fields
+
     steps:
-      - name: Extract issue details
+      - name: Set priority in GitHub Project
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.SRIS_TOKEN }}
           script: |
             const issue = context.payload.issue;
-            const issueId = issue.node_id;
-            const labels = issue.labels.map(label => label.name);
+            const labels = issue.labels.map(label => label.name.toLowerCase());
 
-            // Change these according to your project
-            const org = "jaganpaz"; // org/user that owns the project
-            const projectNumber = 3; // Your GitHub project number
-            const priorityFieldName = "Priority"; // The name of the priority field
+            // Map labels to project priority values
+            const priorityMap = {
+              'low': 'Low',
+              'medium': 'Medium',
+              'high': 'High',
+              'critical': 'Critical'
+            };
 
-            // Find the label starting with "priority:"
-            const priorityLabel = labels.find(label => label.toLowerCase().startsWith("priority:"));
-            if (!priorityLabel) {
-              console.log("No priority label found, skipping update.");
+            // Find the first matching priority label
+            const matchedLabel = Object.keys(priorityMap).find(label => labels.includes(label));
+            if (!matchedLabel) {
+              console.log("No priority label found. Skipping.");
               return;
             }
 
-            const priorityValue = priorityLabel.split(":")[1].trim();
+            const priorityValue = priorityMap[matchedLabel];
 
-            // 1. Get project ID
-            const { data: projects } = await github.graphql(`
-              query($org: String!) {
-                organization(login: $org) {
-                  projectsV2(first: 10) {
-                    nodes {
-                      id
-                      title
-                      number
+            // Get project items for this issue
+            const issueNodeId = issue.node_id;
+
+            const projects = await github.graphql(`
+              query($issueId: ID!) {
+                node(id: $issueId) {
+                  ... on Issue {
+                    projectItems(first: 10) {
+                      nodes {
+                        id
+                        project {
+                          id
+                        }
+                      }
                     }
                   }
                 }
               }
-            `, { org });
-
-            const project = projects.organization.projectsV2.nodes.find(p => p.number === projectNumber);
-            if (!project) {
-              throw new Error("Project not found");
-            }
-
-            const projectId = project.id;
-
-            // 2. Add issue to project
-            const addItem = await github.graphql(`
-              mutation($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: {
-                  projectId: $projectId,
-                  contentId: $contentId
-                }) {
-                  item {
-                    id
-                  }
-                }
-              }
             `, {
-              projectId,
-              contentId: issueId,
+              issueId: issueNodeId
             });
 
-            const itemId = addItem.addProjectV2ItemById.item.id;
+            const projectItem = projects.node.projectItems.nodes[0];
+            if (!projectItem) {
+              console.log("Issue not found in any project.");
+              return;
+            }
 
-            // 3. Get project fields
-            const { data: fieldsData } = await github.graphql(`
+            const projectId = projectItem.project.id;
+            const itemId = projectItem.id;
+
+            // Get project fields
+            const fieldsQuery = await github.graphql(`
               query($projectId: ID!) {
                 node(id: $projectId) {
                   ... on ProjectV2 {
                     fields(first: 20) {
                       nodes {
-                        ... on ProjectV2Field {
-                          id
-                          name
-                        }
                         ... on ProjectV2SingleSelectField {
                           id
                           name
@@ -96,27 +88,27 @@ jobs:
                   }
                 }
               }
-            `, { projectId });
+            `, {
+              projectId
+            });
 
-            const fields = fieldsData.node.fields.nodes;
-            const priorityField = fields.find(f => f.name === priorityFieldName);
-
-            if (!priorityField || !priorityField.options) {
-              throw new Error("Priority field not found or is not a single-select field");
-            }
-
-            const matchedOption = priorityField.options.find(opt => opt.name.toLowerCase() === priorityValue.toLowerCase());
-
-            if (!matchedOption) {
-              console.log(`No matching option for priority: ${priorityValue}`);
+            const priorityField = fieldsQuery.node.fields.nodes.find(f => f.name === "Priority");
+            if (!priorityField) {
+              console.log("Priority field not found in project.");
               return;
             }
 
-            // 4. Set priority
+            const option = priorityField.options.find(opt => opt.name === priorityValue);
+            if (!option) {
+              console.log(Priority option '${priorityValue}' not found.);
+              return;
+            }
+
+            // Update the priority field
             await github.graphql(`
-              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+              mutation($itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
-                  projectId: $projectId,
+                  projectId: "${projectId}",
                   itemId: $itemId,
                   fieldId: $fieldId,
                   value: {
@@ -129,10 +121,9 @@ jobs:
                 }
               }
             `, {
-              projectId,
               itemId,
               fieldId: priorityField.id,
-              optionId: matchedOption.id,
+              optionId: option.id
             });
 
-            console.log(`Issue added to project and priority set to ${priorityValue}`);
+            console.log(Set priority to '${priorityValue}' for issue #${issue.number});
