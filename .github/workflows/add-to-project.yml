@@ -1,20 +1,19 @@
-
-name: Update Issue Priority in Project
+name: Update Priority in GitHub Project
 
 on:
   issues:
     types: [opened, labeled]
 
 permissions:
-  contents: read
+  contents: write
   issues: write
-
 
 jobs:
   update-priority:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Check issue labels and update project priority
+      - name: Update Priority Field in Project
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.SRIS_TOKEN }}
@@ -30,16 +29,14 @@ jobs:
             const matchingLabel = labels.find(label => labelPriorityMap[label]);
 
             if (!matchingLabel) {
-              console.log("No priority label found. Exiting.");
+              console.log("No matching priority label found.");
               return;
             }
 
+            const issueNodeId = issue.node_id;
             const priorityValue = labelPriorityMap[matchingLabel];
 
-            // Get the project items for this issue
-            const issueNodeId = issue.node_id;
-
-            const projectItems = await github.graphql(`
+            const projectData = await github.graphql(`
               query($issueId: ID!) {
                 node(id: $issueId) {
                   ... on Issue {
@@ -52,7 +49,12 @@ jobs:
                             nodes {
                               id
                               name
-                              settings
+                              ... on ProjectV2SingleSelectField {
+                                options {
+                                  id
+                                  name
+                                }
+                              }
                             }
                           }
                         }
@@ -65,29 +67,34 @@ jobs:
               issueId: issueNodeId
             });
 
-            const projectItem = projectItems.node.projectItems.nodes[0];
+            const projectItem = projectData.node.projectItems.nodes[0];
             if (!projectItem) {
               console.log("No project item found for this issue.");
               return;
             }
 
-            const priorityField = projectItem.project.fields.nodes.find(f => f.name === 'Priority');
-            if (!priorityField) {
-              console.log("Priority field not found.");
+            const priorityField = projectItem.project.fields.nodes.find(
+              field => field.name === "Priority"
+            );
+
+            if (!priorityField || !priorityField.options) {
+              console.log("Priority field not found or doesn't have options.");
               return;
             }
 
-            const priorityOptions = JSON.parse(priorityField.settings).options;
-            const option = priorityOptions.find(o => o.name === priorityValue);
-            if (!option) {
-              console.log(`Priority option '${priorityValue}' not found.`);
+            const matchedOption = priorityField.options.find(
+              opt => opt.name.toLowerCase() === priorityValue.toLowerCase()
+            );
+
+            if (!matchedOption) {
+              console.log(`No matching priority option for '${priorityValue}'`);
               return;
             }
 
             await github.graphql(`
-              mutation($itemId: ID!, $fieldId: ID!, $optionId: String!) {
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
-                  projectId: "${projectItem.project.id}",
+                  projectId: $projectId,
                   itemId: $itemId,
                   fieldId: $fieldId,
                   value: {
@@ -100,9 +107,10 @@ jobs:
                 }
               }
             `, {
+              projectId: projectItem.project.id,
               itemId: projectItem.id,
               fieldId: priorityField.id,
-              optionId: option.id
+              optionId: matchedOption.id
             });
 
-            console.log(`Priority updated to '${priorityValue}' for issue #${issue.number}`);
+            console.log(`Updated issue #${issue.number} with Priority '${priorityValue}'`);
